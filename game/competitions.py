@@ -76,6 +76,163 @@ COMPETITIONS: List[Competition] = [
 ]
 
 
+# Cheap keep-vs-sell evaluations — Horsey "test race" equivalent
+@dataclass(frozen=True)
+class TrialShow:
+    id: str
+    name: str
+    tagline: str
+    category: str
+    fee: int
+    # Tiny purse; the point is the report card
+
+
+TRIALS: List[TrialShow] = [
+    TrialShow(
+        id="trial_general",
+        name="Potting Bench Trial",
+        tagline="Quick all-rounder read. Keep or compost?",
+        category="people",
+        fee=2,
+    ),
+    TrialShow(
+        id="trial_flower",
+        name="Bloom Sniff Test",
+        tagline="Beauty check without the big-show nerves.",
+        category="flower",
+        fee=3,
+    ),
+    TrialShow(
+        id="trial_giant",
+        name="Yardstick Trial",
+        tagline="How big is big, really?",
+        category="giant",
+        fee=3,
+    ),
+    TrialShow(
+        id="trial_speed",
+        name="Stopwatch Sprout",
+        tagline="Is it actually fast, or just anxious?",
+        category="speed",
+        fee=3,
+    ),
+    TrialShow(
+        id="trial_weird",
+        name="Oddity Peek",
+        tagline="Rate the strangeness before the Abomination board laughs.",
+        category="abomination",
+        fee=4,
+    ),
+]
+
+
+def get_trial(trial_id: str) -> TrialShow:
+    for t in TRIALS:
+        if t.id == trial_id:
+            return t
+    raise KeyError(trial_id)
+
+
+def _grade(score: float, field_avg: float) -> str:
+    ratio = score / max(field_avg, 1.0)
+    if ratio >= 1.35:
+        return "S"
+    if ratio >= 1.15:
+        return "A"
+    if ratio >= 0.95:
+        return "B"
+    if ratio >= 0.75:
+        return "C"
+    if ratio >= 0.55:
+        return "D"
+    return "F"
+
+
+@dataclass
+class TrialResult:
+    trial_id: str
+    trial_name: str
+    plant_id: str
+    plant_name: str
+    category: str
+    score: float
+    grade: str
+    advice: str
+    category_scores: Dict[str, str]
+    fee_paid: int
+
+    def to_dict(self) -> Dict:
+        return {
+            "trial_id": self.trial_id,
+            "trial_name": self.trial_name,
+            "plant_id": self.plant_id,
+            "plant_name": self.plant_name,
+            "category": self.category,
+            "score": self.score,
+            "grade": self.grade,
+            "advice": self.advice,
+            "category_scores": dict(self.category_scores),
+            "fee_paid": self.fee_paid,
+            "place": {"S": 1, "A": 1, "B": 2, "C": 3, "D": 4, "F": 5}.get(self.grade, 5),
+            "ribbon": f"Trial {self.grade}",
+            "competition_name": self.trial_name,
+            "prize": 0,
+            "prestige": 0,
+        }
+
+
+def run_trial(
+    trial: TrialShow,
+    plant: Plant,
+    rng: Optional[random.Random] = None,
+) -> TrialResult:
+    """Cheap evaluation — report card across categories so you know keep vs sell."""
+    rng = rng or random.Random()
+    categories = ["flower", "giant", "speed", "abomination", "people"]
+    grades: Dict[str, str] = {}
+    scores: Dict[str, float] = {}
+    for cat in categories:
+        s = score_plant(plant, cat)
+        # Fake a local field average for grading
+        field = 55 + rng.uniform(-8, 12)
+        grades[cat] = _grade(s, field)
+        scores[cat] = s
+
+    focus = score_plant(plant, trial.category)
+    field = 55 + rng.uniform(-8, 12)
+    grade = _grade(focus, field)
+
+    advice_map = {
+        "S": "Keep. This one has a future. Possibly a terrifying one.",
+        "A": "Strong keeper. Worth breeding from.",
+        "B": "Decent. Useful parent or solid mid-show entry.",
+        "C": "Average. Sell if pots are tight; keep if it carries something hidden.",
+        "D": "Weak specimen. Sell unless it's a mutation carrier.",
+        "F": "Compost candidate. Or radiation chamber volunteer.",
+    }
+    # Carrier hint
+    ph = plant.phenotype()
+    if grade in ("D", "F") and ph.carrier_mutations:
+        advice = "Looks useless — but it may carry hidden genetics. Check carefully before selling."
+    elif plant.species_kind != "plant" and grade in ("A", "S", "B"):
+        advice = advice_map[grade] + " Also: it isn't strictly a plant. Judges will notice."
+    else:
+        advice = advice_map[grade]
+
+    return TrialResult(
+        trial_id=trial.id,
+        trial_name=trial.name,
+        plant_id=plant.id,
+        plant_name=plant.name,
+        category=trial.category,
+        score=round(focus, 1),
+        grade=grade,
+        advice=advice,
+        category_scores=grades,
+        fee_paid=trial.fee,
+    )
+
+
 def get_competition(comp_id: str) -> Competition:
     for c in COMPETITIONS:
         if c.id == comp_id:
