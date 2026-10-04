@@ -78,11 +78,29 @@ def demo_game(days: int = 40, seed: int = 99) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Headless Lovely Flowers simulation")
+    parser = argparse.ArgumentParser(description="Headless Sine Farm simulation")
     parser.add_argument("--lineage", type=int, default=0, help="Breed N generations")
     parser.add_argument("--game", action="store_true", help="Simulate game loop")
+    parser.add_argument("--morph-demo", action="store_true", help="Write morph preview PNG")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--out",
+        type=str,
+        default="data/previews/sine_farm_morph.png",
+        help="Output path for --morph-demo",
+    )
     args = parser.parse_args()
+    if args.morph_demo:
+        import os
+        from pathlib import Path
+
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+        from procgen.preview import save_gallery
+
+        path = save_gallery(Path(args.out))
+        print(f"Wrote morph demo {path}")
+        return
     if args.lineage:
         demo_lineage(args.lineage, seed=args.seed)
     if args.game or not args.lineage:

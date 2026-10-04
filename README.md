@@ -1,10 +1,11 @@
-# Lovely Flowers
+# Lovely Flowers → Sine Farm
 
-A small single-player plant breeding and collection game.
+A small single-player plant breeding and collection game whose plants are drawn
+from hybrid sine/curve morphs (stems) plus ordinary shapes (leaves, flowers, ornaments).
 
 **Collect → forage → breed → irradiate → trial → compete → sell → repeat.**
 
-Inspired by the simple outer loop of [Horsey Game](https://store.steampowered.com/app/3602570/Horsey_Game/) (Captain Games), translated into plants — with a genetics engine taken far too seriously.
+Inspired by the simple outer loop of [Horsey Game](https://store.steampowered.com/app/3602570/Horsey_Game/) (Captain Games), with a genetics engine taken far too seriously — and a Crow Sign–style belief that math can *be* the asset.
 
 ## Play
 
@@ -49,19 +50,19 @@ pytest -q
 ```
 genetics/     # alleles, mutations, phenotype, kinds
 game/         # state, world/locations, wild, radiation, competitions
-ui/           # Pygame front-end + procedural renderer
-procgen/      # Sine Farm morph preview (not wired into gameplay yet)
+procgen/      # hybrid sine morph renderer (stems/waves + shape foliage)
+ui/           # Pygame front-end (draw_plant facade → procgen)
 tests/
 main.py
 ```
 
 ## Sine Farm morph preview
 
-Standalone visual prototype for hybrid sine-based plants. Does **not** change the live game renderer.
+Standalone gallery for the hybrid plant look:
 
 ```bash
 SDL_VIDEODRIVER=dummy python3 scripts/morph_preview.py
 # writes data/previews/sine_farm_morph.png
 ```
 
-Sine waves drive stems/branches; leaves/flowers use ordinary shapes with a light wave deform; eyes/faces/pots stay simple primitives.
+Sine waves drive stems/branches; leaves/flowers use ordinary shapes with a light wave deform; eyes/faces/pots stay simple primitives. The live greenhouse uses the same morph path via `ui/plant_renderer.py`.

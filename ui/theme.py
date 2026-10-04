@@ -10,6 +10,8 @@ PANEL_EDGE = (90, 120, 85)
 PANEL_INNER = (44, 70, 52)
 ACCENT = (212, 140, 62)  # copper
 ACCENT_DIM = (160, 100, 45)
+# Soft wave-tint for Sine Farm identity (cool edge, not purple wash)
+WAVE_HINT = (70, 140, 130)
 TEXT = (235, 228, 210)
 TEXT_DIM = (170, 175, 150)
 DANGER = (200, 80, 70)
