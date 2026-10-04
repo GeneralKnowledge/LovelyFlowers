@@ -587,8 +587,9 @@ class GameState:
         seed = seed if seed is not None else random.randint(1, 999999)
         gs = cls(rng_seed=seed)
         gs._rng = random.Random(seed)
-        gs.log("Welcome to Lovely Flowers — a dangerously serious plant-breeding greenhouse.")
+        gs.log("Welcome to Sine Farm — a dangerously serious plant-breeding greenhouse.")
         gs.log("Buy seeds, forage the wild, irradiate regrets, trial before you sell.")
+        gs.log("Plants are grown from genes — and drawn from waves.")
         starter = create_seed_plant("Mavis", rng=gs._rng, quality="common")
         starter.planted = True
         starter.mature = True

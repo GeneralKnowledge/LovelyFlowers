@@ -1,4 +1,4 @@
-"""Lovely Flowers — Pygame front-end for the plant breeding greenhouse."""
+"""Sine Farm — Pygame front-end for the plant breeding greenhouse."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from genetics.alleles import COLOUR_LOCUS, SHAPE_LOCUS
 from genetics.mutations import MUTATION_CATALOG
 from ui import theme
 from ui.plant_renderer import draw_plant, plant_portrait
+from procgen.audio import blip_from_morph, set_enabled
+from procgen.morph import morph_from_phenotype, seed_from_plant_id
 
 
 WIDTH, HEIGHT = 1180, 720
@@ -48,7 +50,7 @@ class Button:
 class LovelyFlowersApp:
     def __init__(self) -> None:
         pygame.init()
-        pygame.display.set_caption("Lovely Flowers — Serious Plant Breeding")
+        pygame.display.set_caption("Sine Farm — Serious Plant Breeding")
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
         self.font = self._load_font(18)
@@ -68,6 +70,8 @@ class LovelyFlowersApp:
         self.toast_timer = 0.0
         self.time_s = 0.0
         self.show_help = False
+        # Audio stays lazy/mute-safe (initialized on first blip)
+        set_enabled(True)
 
     def _load_font(self, size: int) -> pygame.font.Font:
         # Prefer a slightly characterful system font
@@ -130,6 +134,7 @@ class LovelyFlowersApp:
             matured = self.state.advance_time(8)
             if matured:
                 self._toast("Matured: " + ", ".join(matured[:3]))
+                self._blip_named(matured[0], "mature")
             else:
                 self._toast("Time passes in the greenhouse...")
             self.state.save(SAVE_PATH)
@@ -200,6 +205,8 @@ class LovelyFlowersApp:
         elif action == "advance":
             matured = self.state.advance_time(8)
             self._toast("Matured: " + ", ".join(matured) if matured else "Growing...")
+            if matured:
+                self._blip_named(matured[0], "mature")
             self.state.save(SAVE_PATH)
         elif action == "save":
             self.state.save(SAVE_PATH)
@@ -251,6 +258,7 @@ class LovelyFlowersApp:
                     self._toast(f"Litter of {len(kids)}: " + ", ".join(k.name for k in kids))
                     self.selected_id = kids[0].id
                     self.mode = "greenhouse"
+                    self._blip_plant(kids[0], "breed")
                     self.state.save(SAVE_PATH)
                 else:
                     self._toast(self.state.messages[-1] if self.state.messages else "Breeding failed")
@@ -261,6 +269,7 @@ class LovelyFlowersApp:
                     self._toast("Irradiated litter: " + ", ".join(k.name for k in kids))
                     self.selected_id = kids[0].id
                     self.mode = "greenhouse"
+                    self._blip_plant(kids[0], "breed")
                     self.state.save(SAVE_PATH)
                 else:
                     self._toast(self.state.messages[-1] if self.state.messages else "Radiation cross failed")
@@ -352,7 +361,7 @@ class LovelyFlowersApp:
             pygame.draw.line(self.screen, (40, 65, 50), (x, 70), (x, HEIGHT), 1)
 
     def _draw_header(self) -> None:
-        title = self.font_lg.render("Lovely Flowers", True, theme.ACCENT)
+        title = self.font_lg.render("Sine Farm", True, theme.ACCENT)
         self.screen.blit(title, (24, 14))
         sub = self.font_sm.render(
             "Collect · Breed · Genetically improve · Compete · Sell · Repeat",
@@ -1201,9 +1210,9 @@ class LovelyFlowersApp:
         box = pygame.Rect(180, 100, WIDTH - 360, HEIGHT - 200)
         self._panel(box)
         lines = [
-            "Lovely Flowers — Help",
+            "Sine Farm — Help",
             "",
-            "Breeding is the game. Everything else feeds the bloodline.",
+            "Breeding is the game. Plants are drawn from sine stems and weird genes.",
             "",
             "Greenhouse / Wait — grow specimens",
             "Shop — seeds & upgrades (incl. Radiation Chamber Kit)",
@@ -1222,6 +1231,23 @@ class LovelyFlowersApp:
             color = theme.ACCENT if i == 0 else theme.TEXT
             self.screen.blit(font.render(line, True, color), (box.x + 28, y))
             y += 28 if i == 0 else 22
+
+    def _blip_plant(self, plant, kind: str = "mature") -> None:
+        try:
+            morph = morph_from_phenotype(
+                plant.phenotype(),
+                seed=seed_from_plant_id(plant.id),
+                label=plant.name,
+            )
+            blip_from_morph(morph, kind=kind)
+        except Exception:
+            pass
+
+    def _blip_named(self, name: str, kind: str = "mature") -> None:
+        for p in self.state.living_plants():
+            if p.name == name:
+                self._blip_plant(p, kind)
+                return
 
     def _blit_wrapped(
         self,

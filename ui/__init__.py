@@ -1,1 +1,1 @@
-"""Pygame UI for Lovely Flowers."""
+"""Pygame UI for Sine Farm."""

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lovely Flowers — entry point."""
+"""Sine Farm — entry point."""
 
 from ui.app import main
 
