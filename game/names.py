@@ -102,9 +102,20 @@ def offspring_names(
 def humorous_description(plant: Plant) -> str:
     ph = plant.phenotype()
     bits = []
+    kind = getattr(plant, "species_kind", "plant")
+    if kind == "fungus":
+        bits.append("Insists it is not a plant. The greenhouse disagrees.")
+    elif kind == "mossbeast":
+        bits.append("Moss with ambition and poor boundaries.")
+    elif kind == "bloomcritter":
+        bits.append("Floral. Possibly fleeing.")
+    elif kind == "hybrid":
+        bits.append("Taxonomy has filed a missing-person report.")
+    elif kind == "lichen":
+        bits.append("A committee wearing one coat.")
     if ph.height > 0.8:
         bits.append("Looms like it pays rent.")
-    elif ph.height < 0.3:
+    elif ph.height < 0.3 and kind == "plant":
         bits.append("Could lose a staring contest with a mushroom.")
     if ph.growth > 0.8:
         bits.append("Grows with concerning enthusiasm.")
@@ -114,6 +125,10 @@ def humorous_description(plant: Plant) -> str:
         bits.append("Structurally optimistic.")
     if ph.yield_ > 0.8:
         bits.append("Produces like it's showing off.")
+    if getattr(plant, "wild", False):
+        bits.append("Dragged in from the wild. Still sulking.")
+    if getattr(plant, "irradiated", False):
+        bits.append("Smells faintly of ozone and poor decisions.")
     for mid in ph.expressed_mutations:
         bits.append(MUTATION_CATALOG[mid].humour)
     if not bits:

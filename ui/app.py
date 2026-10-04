@@ -8,9 +8,10 @@ from typing import List, Optional, Tuple
 
 import pygame
 
-from game.competitions import COMPETITIONS
+from game.competitions import COMPETITIONS, TRIALS
 from game.names import humorous_description
 from game.state import SAVE_PATH, SEED_CATALOG, UPGRADES, GameState
+from game.world import LOCATIONS, KIND_LABELS
 from genetics.alleles import COLOUR_LOCUS, SHAPE_LOCUS
 from genetics.mutations import MUTATION_CATALOG
 from ui import theme
@@ -150,6 +151,8 @@ class LovelyFlowersApp:
         elif event.key == pygame.K_4:
             self.mode = "contest"
         elif event.key == pygame.K_5:
+            self.mode = "travel"
+        elif event.key == pygame.K_6:
             self.mode = "collection"
 
     def _on_hover(self, pos: Tuple[int, int]) -> None:
@@ -184,6 +187,12 @@ class LovelyFlowersApp:
             self.mode = "contest"
         elif action == "goto:collection":
             self.mode = "collection"
+        elif action == "goto:travel":
+            self.mode = "travel"
+        elif action == "goto:lab":
+            self.mode = "lab"
+        elif action == "goto:trials":
+            self.mode = "trials"
         elif action == "goto:pedigree":
             self.mode = "pedigree"
         elif action == "goto:inspect":
@@ -245,20 +254,56 @@ class LovelyFlowersApp:
                     self.state.save(SAVE_PATH)
                 else:
                     self._toast(self.state.messages[-1] if self.state.messages else "Breeding failed")
-        elif action.startswith("contest:"):
-            parts = action.split(":")
-            # contest:comp_id:plant_id
-            if len(parts) >= 3:
-                result = self.state.enter_competition(parts[1], parts[2])
-                if result:
-                    self._toast(f"{result.ribbon} — {result.summary}")
+        elif action == "breed_rad":
+            if self.breed_a and self.breed_b:
+                kids = self.state.breed_plants(self.breed_a, self.breed_b, under_radiation=True)
+                if kids:
+                    self._toast("Irradiated litter: " + ", ".join(k.name for k in kids))
+                    self.selected_id = kids[0].id
+                    self.mode = "greenhouse"
                     self.state.save(SAVE_PATH)
+                else:
+                    self._toast(self.state.messages[-1] if self.state.messages else "Radiation cross failed")
         elif action.startswith("contest_enter:"):
             comp_id = action.split(":", 1)[1]
             if self.selected_id:
                 result = self.state.enter_competition(comp_id, self.selected_id)
                 if result:
                     self._toast(f"{result.ribbon}: place {result.place}")
+                    self.state.save(SAVE_PATH)
+        elif action.startswith("explore:"):
+            loc_id = action.split(":", 1)[1]
+            wild = self.state.explore(loc_id)
+            if wild:
+                self.selected_id = wild.id
+                self._toast(f"Found {wild.name} ({KIND_LABELS.get(wild.species_kind, wild.species_kind)})")
+                self.mode = "inspect"
+                self.state.save(SAVE_PATH)
+            else:
+                self._toast(self.state.messages[-1] if self.state.messages else "Expedition failed")
+        elif action.startswith("irradiate:"):
+            intensity = action.split(":", 1)[1]
+            if self.selected_id:
+                report = self.state.irradiate_plant(self.selected_id, intensity=intensity)
+                if report:
+                    if not report.get("survived", True):
+                        self._toast("Specimen destroyed by radiation.")
+                        self.selected_id = None
+                        self.mode = "greenhouse"
+                    else:
+                        gained = report.get("mutations_gained") or []
+                        self._toast(
+                            f"Radiation done. +{len(gained)} mutation allele(s)."
+                            if gained
+                            else "Radiation done. Subtle chaos."
+                        )
+                    self.state.save(SAVE_PATH)
+        elif action.startswith("trial:"):
+            trial_id = action.split(":", 1)[1]
+            if self.selected_id:
+                result = self.state.run_plant_trial(trial_id, self.selected_id)
+                if result:
+                    self._toast(f"Trial {result.grade}: {result.advice[:60]}")
                     self.state.save(SAVE_PATH)
 
     # --- drawing -------------------------------------------------------
@@ -280,6 +325,12 @@ class LovelyFlowersApp:
             self._draw_collection()
         elif self.mode == "pedigree":
             self._draw_pedigree()
+        elif self.mode == "travel":
+            self._draw_travel()
+        elif self.mode == "lab":
+            self._draw_lab()
+        elif self.mode == "trials":
+            self._draw_trials()
         self._draw_nav()
         if self.mode == "greenhouse":
             self._draw_log()
@@ -322,22 +373,25 @@ class LovelyFlowersApp:
             ("Greenhouse", "goto:greenhouse", self.mode == "greenhouse"),
             ("Shop", "goto:shop", self.mode == "shop"),
             ("Breed", "goto:breed", self.mode == "breed"),
-            ("Compete", "goto:contest", self.mode == "contest"),
-            ("Collection", "goto:collection", self.mode == "collection"),
-            ("Wait (+8h)", "advance", False),
+            ("Compete", "goto:contest", self.mode in ("contest", "trials")),
+            ("Travel", "goto:travel", self.mode == "travel"),
+            ("Lab", "goto:lab", self.mode == "lab"),
+            ("Catalog", "goto:collection", self.mode == "collection"),
+            ("Wait", "advance", False),
             ("Save", "save", False),
-            ("Help", "help", False),
+            ("?", "help", False),
         ]
-        x = 24
+        x = 10
         y = HEIGHT - 48
         for label, action, active in labels:
-            rect = pygame.Rect(x, y, 120 if len(label) < 12 else 130, 32)
+            w = 88 if len(label) <= 4 else (100 if len(label) < 9 else 110)
+            rect = pygame.Rect(x, y, w, 32)
             b = Button(rect, label, action)
             if active:
                 b.hover = True
             self.buttons.append(b)
             b.draw(self.screen, self.font_sm)
-            x += rect.width + 8
+            x += rect.width + 5
 
     def _pot_rects(self) -> List[pygame.Rect]:
         slots = self.state.greenhouse_slots
@@ -423,8 +477,11 @@ class LovelyFlowersApp:
         name = self.font_lg.render(plant.name, True, theme.ACCENT)
         self.screen.blit(name, name.get_rect(midtop=(left.centerx, left.y + 270)))
         meta = self.font_sm.render(
+            f"{KIND_LABELS.get(plant.species_kind, plant.species_kind)}  ·  "
             f"Gen {plant.generation}  ·  Age {plant.age_days:.1f}d  ·  "
-            f"{'Mature' if plant.mature else 'Growing'}",
+            f"{'Mature' if plant.mature else 'Growing'}"
+            + ("  ·  Wild" if plant.wild else "")
+            + ("  ·  Irradiated" if plant.irradiated else ""),
             True,
             theme.TEXT_DIM,
         )
@@ -436,18 +493,21 @@ class LovelyFlowersApp:
             ("Favourite" if not plant.favourite else "Unfavourite", "favourite"),
             ("Pedigree", "goto:pedigree"),
             ("Breed", "goto:breed"),
+            ("Trial", "goto:trials"),
+            ("Lab", "goto:lab"),
             ("Compete", "goto:contest"),
             ("Sell $%.1f" % (ph.value if plant.mature else ph.value * 0.35), "sell"),
             ("Back", "goto:greenhouse"),
         ]
         for i, (label, action) in enumerate(actions):
             col, row = i % 2, i // 2
-            rect = pygame.Rect(left.x + 24 + col * 160, left.bottom - 100 + row * 34, 150, 28)
+            rect = pygame.Rect(left.x + 24 + col * 160, left.bottom - 130 + row * 30, 150, 26)
             enabled = plant.mature or action in (
                 "favourite",
                 "goto:greenhouse",
                 "sell",
                 "goto:pedigree",
+                "goto:lab",
             )
             b = Button(rect, label, action, enabled=enabled)
             self.buttons.append(b)
@@ -541,6 +601,22 @@ class LovelyFlowersApp:
                 )
                 y += 18
 
+        if plant.trial_history:
+            y += 8
+            self.screen.blit(self.font.render("Trial Cards", True, theme.ACCENT), (right.x + 24, y))
+            y += 24
+            last = plant.trial_history[-1]
+            grades = last.get("category_scores", {})
+            grade_line = "  ".join(f"{k[:3]}:{v}" for k, v in grades.items())
+            self.screen.blit(
+                self.font_sm.render(
+                    f"{last.get('trial_name')}: {last.get('grade')} — {grade_line}",
+                    True,
+                    theme.TEXT,
+                ),
+                (right.x + 24, y),
+            )
+
     def _draw_breed(self) -> None:
         panel = pygame.Rect(40, 90, WIDTH - 80, HEIGHT - 200)
         self._panel(panel)
@@ -573,15 +649,29 @@ class LovelyFlowersApp:
             ok, msg = self.state.can_breed(self.breed_a, self.breed_b)
         self.screen.blit(self.font_sm.render(msg, True, theme.GOOD if ok else theme.TEXT_DIM), (panel.x + 40, panel.y + 290))
 
-        b = Button(pygame.Rect(panel.x + 40, panel.y + 320, 160, 34), "Breed", "breed_go", enabled=ok)
+        b = Button(pygame.Rect(panel.x + 40, panel.y + 320, 140, 34), "Breed", "breed_go", enabled=ok)
         self.buttons.append(b)
         b.draw(self.screen, self.font)
-        b2 = Button(pygame.Rect(panel.x + 220, panel.y + 320, 120, 34), "Clear", "breed_clear")
+        rad_ok = ok and self.state.has_radiation_access()
+        b_rad = Button(
+            pygame.Rect(panel.x + 190, panel.y + 320, 180, 34),
+            "Irradiated Cross",
+            "breed_rad",
+            enabled=rad_ok,
+        )
+        self.buttons.append(b_rad)
+        b_rad.draw(self.screen, self.font)
+        b2 = Button(pygame.Rect(panel.x + 380, panel.y + 320, 100, 34), "Clear", "breed_clear")
         self.buttons.append(b2)
         b2.draw(self.screen, self.font)
-        b3 = Button(pygame.Rect(panel.x + 360, panel.y + 320, 120, 34), "Back", "goto:greenhouse")
+        b3 = Button(pygame.Rect(panel.x + 490, panel.y + 320, 100, 34), "Back", "goto:greenhouse")
         self.buttons.append(b3)
         b3.draw(self.screen, self.font)
+        if not self.state.has_radiation_access():
+            self.screen.blit(
+                self.font_sm.render("Irradiated crosses unlock via Abandoned Lab or chamber kit.", True, theme.TEXT_DIM),
+                (panel.x + 40, panel.y + 360),
+            )
 
         # Mature plant picker
         self.screen.blit(self.font.render("Mature plants", True, theme.TEXT), (panel.x + 560, panel.y + 90))
@@ -596,7 +686,10 @@ class LovelyFlowersApp:
                 rect,
                 border_radius=4,
             )
-            label = f"{p.name}  Gen{p.generation}  mut:{len(p.phenotype().expressed_mutations)}  ${p.value:.0f}"
+            label = (
+                f"{p.name}  [{KIND_LABELS.get(p.species_kind, '?')[:6]}]  "
+                f"Gen{p.generation}  mut:{len(p.phenotype().expressed_mutations)}  ${p.value:.0f}"
+            )
             self.screen.blit(self.font_sm.render(label, True, theme.TEXT), (rect.x + 8, rect.y + 6))
             btn = Button(rect, "", f"breed_pick:{p.id}")
             self.buttons.append(btn)
@@ -681,6 +774,9 @@ class LovelyFlowersApp:
         b = Button(pygame.Rect(panel.x + 24, panel.bottom - 50, 120, 32), "Back", "goto:greenhouse")
         self.buttons.append(b)
         b.draw(self.screen, self.font_sm)
+        bt = Button(pygame.Rect(panel.x + 160, panel.bottom - 50, 160, 32), "Trial Shows", "goto:trials")
+        self.buttons.append(bt)
+        bt.draw(self.screen, self.font_sm)
 
     def _draw_shop(self) -> None:
         panel = pygame.Rect(40, 90, WIDTH - 80, HEIGHT - 200)
@@ -867,6 +963,237 @@ class LovelyFlowersApp:
         pygame.draw.rect(self.screen, theme.ACCENT_DIM, bg, border_radius=8)
         self.screen.blit(text, rect)
 
+    def prestige_lock(self, loc) -> bool:
+        return self.state.prestige < loc.prestige_required
+
+    def _draw_trials(self) -> None:
+        panel = pygame.Rect(40, 90, WIDTH - 80, HEIGHT - 200)
+        self._panel(panel)
+        self.screen.blit(self.font_lg.render("Trial Shows", True, theme.ACCENT), (panel.x + 24, panel.y + 16))
+        self.screen.blit(
+            self.font_sm.render(
+                "Cheap keep-vs-sell evaluations — the test-race equivalent. Grades, not glory.",
+                True,
+                theme.TEXT_DIM,
+            ),
+            (panel.x + 24, panel.y + 52),
+        )
+        plant = self.state.plants.get(self.selected_id) if self.selected_id else None
+        if plant and not plant.sold:
+            self.screen.blit(
+                self.font.render(
+                    f"Selected: {plant.name} ({KIND_LABELS.get(plant.species_kind, '?')})",
+                    True,
+                    theme.TEXT,
+                ),
+                (panel.x + 24, panel.y + 80),
+            )
+        else:
+            self.screen.blit(
+                self.font.render("Select a mature specimen first.", True, theme.DANGER),
+                (panel.x + 24, panel.y + 80),
+            )
+
+        y = panel.y + 120
+        for trial in TRIALS:
+            rect = pygame.Rect(panel.x + 24, y, 700, 56)
+            pygame.draw.rect(self.screen, theme.PANEL_INNER, rect, border_radius=8)
+            pygame.draw.rect(self.screen, theme.PANEL_EDGE, rect, 1, border_radius=8)
+            self.screen.blit(self.font.render(trial.name, True, theme.TEXT), (rect.x + 14, rect.y + 8))
+            self.screen.blit(self.font_sm.render(trial.tagline, True, theme.TEXT_DIM), (rect.x + 14, rect.y + 30))
+            can = plant is not None and plant.mature and self.state.money >= trial.fee
+            b = Button(
+                pygame.Rect(rect.right - 130, rect.y + 12, 110, 32),
+                f"${trial.fee}",
+                f"trial:{trial.id}",
+                enabled=can,
+            )
+            self.buttons.append(b)
+            b.draw(self.screen, self.font_sm)
+            y += 64
+
+        if self.state.last_trial:
+            lt = self.state.last_trial
+            box = pygame.Rect(panel.x + 760, panel.y + 120, 300, 200)
+            pygame.draw.rect(self.screen, theme.PANEL_INNER, box, border_radius=8)
+            self.screen.blit(
+                self.font.render(f"Grade {lt.get('grade')}", True, theme.GOLD),
+                (box.x + 12, box.y + 10),
+            )
+            grades = lt.get("category_scores", {})
+            yy = box.y + 44
+            for cat, g in grades.items():
+                self.screen.blit(self.font_sm.render(f"{cat}: {g}", True, theme.TEXT), (box.x + 12, yy))
+                yy += 20
+            self._blit_wrapped(
+                lt.get("advice", ""),
+                self.font_sm,
+                theme.TEXT_DIM,
+                box.inflate(-20, -120).move(0, 80),
+                280,
+            )
+
+        b = Button(pygame.Rect(panel.x + 24, panel.bottom - 50, 120, 32), "Back", "goto:contest")
+        self.buttons.append(b)
+        b.draw(self.screen, self.font_sm)
+
+    def _draw_travel(self) -> None:
+        panel = pygame.Rect(40, 90, WIDTH - 80, HEIGHT - 200)
+        self._panel(panel)
+        self.screen.blit(self.font_lg.render("Expeditions", True, theme.ACCENT), (panel.x + 24, panel.y + 16))
+        self.screen.blit(
+            self.font_sm.render(
+                "Travel is simulated for now — pay the fare, skip the walking, drag home weirdness. Real maps later.",
+                True,
+                theme.TEXT_DIM,
+            ),
+            (panel.x + 24, panel.y + 52),
+        )
+        self.screen.blit(
+            self.font_sm.render(
+                f"Current: {self.state.current_location}  ·  "
+                f"Visited: {len(self.state.visited_locations)}/{len(LOCATIONS)}",
+                True,
+                theme.TEXT,
+            ),
+            (panel.x + 24, panel.y + 78),
+        )
+
+        y = panel.y + 110
+        for loc in LOCATIONS:
+            if loc.id == "home":
+                continue
+            locked = self.prestige_lock(loc)
+            rect = pygame.Rect(panel.x + 24, y, WIDTH - 140, 62)
+            pygame.draw.rect(self.screen, theme.PANEL_INNER, rect, border_radius=8)
+            edge = theme.PANEL_EDGE if locked else (
+                theme.DANGER if loc.special == "radiation_zone" else theme.ACCENT
+            )
+            pygame.draw.rect(self.screen, edge, rect, 1, border_radius=8)
+            title = loc.name + ("  [LOCKED]" if locked else "")
+            self.screen.blit(
+                self.font.render(title, True, theme.TEXT_DIM if locked else theme.TEXT),
+                (rect.x + 14, rect.y + 8),
+            )
+            kinds = ", ".join(sorted({KIND_LABELS.get(k, k) for k in loc.wild_kinds}))
+            self.screen.blit(
+                self.font_sm.render(
+                    f"{loc.tagline}  ·  finds: {kinds}  ·  ${loc.travel_cost} / {loc.travel_hours:.0f}h",
+                    True,
+                    theme.TEXT_DIM,
+                ),
+                (rect.x + 14, rect.y + 34),
+            )
+            can = (
+                not locked
+                and self.state.money >= loc.travel_cost
+                and self.state._count_free_pots() >= 1
+            )
+            b = Button(
+                pygame.Rect(rect.right - 130, rect.y + 14, 110, 34),
+                "Explore",
+                f"explore:{loc.id}",
+                enabled=can,
+            )
+            self.buttons.append(b)
+            b.draw(self.screen, self.font_sm)
+            y += 70
+
+        b = Button(pygame.Rect(panel.x + 24, panel.bottom - 50, 120, 32), "Back", "goto:greenhouse")
+        self.buttons.append(b)
+        b.draw(self.screen, self.font_sm)
+
+    def _draw_lab(self) -> None:
+        panel = pygame.Rect(40, 90, WIDTH - 80, HEIGHT - 200)
+        self._panel(panel)
+        self.screen.blit(
+            self.font_lg.render("Radiation Chamber", True, theme.ACCENT),
+            (panel.x + 24, panel.y + 16),
+        )
+        unlocked = self.state.has_radiation_access()
+        status = (
+            "ONLINE — handle with tongs"
+            if unlocked
+            else "LOCKED — visit Abandoned Lab or buy chamber kit"
+        )
+        self.screen.blit(
+            self.font_sm.render(status, True, theme.GOOD if unlocked else theme.DANGER),
+            (panel.x + 24, panel.y + 52),
+        )
+        self.screen.blit(
+            self.font_sm.render(
+                "Force mutations into a specimen. Severe can destroy it. Irradiated crosses: Breed bench.",
+                True,
+                theme.TEXT_DIM,
+            ),
+            (panel.x + 24, panel.y + 78),
+        )
+
+        plant = self.state.plants.get(self.selected_id) if self.selected_id else None
+        if plant and not plant.sold:
+            self.screen.blit(
+                self.font.render(f"Selected: {plant.name}", True, theme.TEXT),
+                (panel.x + 24, panel.y + 110),
+            )
+            draw_plant(self.screen, plant, (panel.x + 200, panel.y + 280), 120, self.time_s)
+        else:
+            self.screen.blit(
+                self.font.render("Select a specimen from the greenhouse first.", True, theme.DANGER),
+                (panel.x + 24, panel.y + 110),
+            )
+
+        y = panel.y + 160
+        for intensity, label, cost in [
+            ("mild", "Mild dose", 15),
+            ("standard", "Standard blast", 25),
+            ("severe", "Severe cook", 40),
+        ]:
+            can = unlocked and plant is not None and not plant.sold and self.state.money >= cost
+            b = Button(
+                pygame.Rect(panel.x + 360, y, 280, 40),
+                f"{label} (${cost})",
+                f"irradiate:{intensity}",
+                enabled=can,
+            )
+            self.buttons.append(b)
+            b.draw(self.screen, self.font)
+            y += 52
+
+        if self.state.last_radiation:
+            lr = self.state.last_radiation
+            box = pygame.Rect(panel.x + 680, panel.y + 160, 360, 200)
+            pygame.draw.rect(self.screen, theme.PANEL_INNER, box, border_radius=8)
+            self.screen.blit(self.font.render("Last blast", True, theme.GOLD), (box.x + 12, box.y + 10))
+            self.screen.blit(
+                self.font_sm.render(
+                    f"{lr.get('plant_name')} — {lr.get('intensity')}",
+                    True,
+                    theme.TEXT,
+                ),
+                (box.x + 12, box.y + 40),
+            )
+            gained = lr.get("mutations_gained") or []
+            self.screen.blit(
+                self.font_sm.render(
+                    f"Gained alleles: {len(gained)}"
+                    + (" (survived)" if lr.get("survived") else " DESTROYED"),
+                    True,
+                    theme.TEXT,
+                ),
+                (box.x + 12, box.y + 66),
+            )
+            yy = box.y + 94
+            for note in (lr.get("notes") or [])[:4]:
+                self.screen.blit(
+                    self.font_sm.render(note[:42], True, theme.TEXT_DIM),
+                    (box.x + 12, yy),
+                )
+                yy += 20
+
+        b = Button(pygame.Rect(panel.x + 24, panel.bottom - 50, 120, 32), "Back", "goto:greenhouse")
+        self.buttons.append(b)
+        b.draw(self.screen, self.font_sm)
+
     def _draw_help(self) -> None:
         overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         overlay.fill((10, 20, 14, 200))
@@ -876,20 +1203,18 @@ class LovelyFlowersApp:
         lines = [
             "Lovely Flowers — Help",
             "",
-            "This is a plant-breeding game. Farming is not the point. Bloodlines are.",
+            "Breeding is the game. Everything else feeds the bloodline.",
             "",
-            "Space / Wait — advance time so plants grow",
-            "Shop — buy seeds and expand the greenhouse",
-            "Inspect a plant — study traits, mutations, value",
-            "Breed — cross two mature plants; alleles segregate for real",
-            "Compete — enter shows for prize money and prestige",
-            "Collection — track mutations (??? until discovered), colours, ribbons",
+            "Greenhouse / Wait — grow specimens",
+            "Shop — seeds & upgrades (incl. Radiation Chamber Kit)",
+            "Travel — simulated expeditions; wild plants, fungi, mossbeasts…",
+            "Lab — radiation chamber: force mutations / risk destruction",
+            "Breed — normal or irradiated crosses (cross-kingdom allowed)",
+            "Trial Shows — cheap grades to decide keep vs sell (test-race vibe)",
+            "Compete — real shows for money & prestige",
+            "Catalog — discoveries; unknowns stay ???",
             "",
-            "Hidden carriers can pass recessive mutations for generations.",
-            "Rare combinations break trade-offs. Ridiculous mutations are heritable.",
-            "",
-            "S — save    H — toggle help    Esc — back / quit",
-            "Ctrl+N — new game",
+            "S — save    H — help    Esc — back/quit    Ctrl+N — new game",
         ]
         y = box.y + 24
         for i, line in enumerate(lines):

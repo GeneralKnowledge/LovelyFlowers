@@ -23,7 +23,7 @@ Genotype = Dict[str, Tuple[str, str]]
 
 @dataclass
 class Plant:
-    """A single owned plant specimen."""
+    """A single owned specimen (plant, fungus, hybrid, or worse)."""
 
     id: str
     name: str
@@ -35,9 +35,14 @@ class Plant:
     mature: bool = False
     growth_progress: float = 0.0  # 0–1 while growing
     competition_history: List[Dict] = field(default_factory=list)
+    trial_history: List[Dict] = field(default_factory=list)
     notes: str = ""
     favourite: bool = False
     sold: bool = False
+    species_kind: str = "plant"  # plant, fungus, lichen, mossbeast, bloomcritter, hybrid
+    origin: str = "home"  # location id
+    wild: bool = False
+    irradiated: bool = False
 
     # Cached phenotype (recomputed when needed)
     _phenotype: Optional[Phenotype] = field(default=None, repr=False)
@@ -83,9 +88,14 @@ class Plant:
             "mature": self.mature,
             "growth_progress": self.growth_progress,
             "competition_history": list(self.competition_history),
+            "trial_history": list(self.trial_history),
             "notes": self.notes,
             "favourite": self.favourite,
             "sold": self.sold,
+            "species_kind": self.species_kind,
+            "origin": self.origin,
+            "wild": self.wild,
+            "irradiated": self.irradiated,
         }
 
     @classmethod
@@ -103,9 +113,14 @@ class Plant:
             mature=data.get("mature", False),
             growth_progress=data.get("growth_progress", 0.0),
             competition_history=list(data.get("competition_history", [])),
+            trial_history=list(data.get("trial_history", [])),
             notes=data.get("notes", ""),
             favourite=data.get("favourite", False),
             sold=data.get("sold", False),
+            species_kind=data.get("species_kind", "plant"),
+            origin=data.get("origin", "home"),
+            wild=data.get("wild", False),
+            irradiated=data.get("irradiated", False),
         )
 
 
@@ -244,12 +259,33 @@ def breed(
     _maybe_mutate(child_genotype, stability_est, rng)
 
     generation = max(parent_a.generation, parent_b.generation) + 1
+    from genetics.kinds import hybrid_kind
+
+    kind = hybrid_kind(
+        getattr(parent_a, "species_kind", "plant"),
+        getattr(parent_b, "species_kind", "plant"),
+    )
+    # Hybrids are less stable — nudge stability down sometimes
+    if kind == "hybrid" and "stability" in child_genotype and rng.random() < 0.55:
+        a, b = child_genotype["stability"]
+        order = ["t0", "t1", "t2", "t3", "t4"]
+
+        def down(x: str) -> str:
+            if x not in order:
+                return "t1"
+            return order[max(0, order.index(x) - 1)]
+
+        child_genotype["stability"] = (down(a), down(b))
+
     child = Plant(
         id=str(uuid.uuid4())[:8],
         name=name,
         genotype=child_genotype,
         generation=generation,
         parent_ids=(parent_a.id, parent_b.id),
+        species_kind=kind,
+        origin=getattr(parent_a, "origin", "home"),
+        notes="Hybrid abomination." if kind == "hybrid" else "",
     )
     child.phenotype()
     return child
