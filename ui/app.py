@@ -852,8 +852,10 @@ class LovelyFlowersApp:
         self._panel(box)
         self.screen.blit(self.font_sm.render("Greenhouse Log", True, theme.ACCENT), (box.x + 12, box.y + 8))
         y = box.y + 32
-        for line in self.state.messages[-7:]:
-            self._blit_wrapped(line, self.font_sm, theme.TEXT, pygame.Rect(box.x + 12, y, 266, 40), 266)
+        for line in self.state.messages[-6:]:
+            # Single-line clipped entries keep the log readable
+            text = line if self.font_sm.size(line)[0] <= 266 else line[:42] + "…"
+            self.screen.blit(self.font_sm.render(text, True, theme.TEXT), (box.x + 12, y))
             y += 22
             if y > box.bottom - 16:
                 break
